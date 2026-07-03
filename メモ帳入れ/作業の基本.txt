@@ -1,0 +1,9 @@
+ChatGPTで「次に作る機能」を決める
+ChatGPTでCodex用の指示文を作る
+Codexに投げる
+Codexの設計案・コード案をChatGPTに持ってくる
+ChatGPTで確認する
+OKならCodexに実装させる
+Unityで実行する
+エラーや違和感が出たらCodexに修正させる
+進んだ内容を作業ログに残す
