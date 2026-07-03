@@ -3,7 +3,7 @@ namespace WeaponMazeAlchemy.Prototype
     public class PlayerActor : Actor
     {
         public PlayerActor(GridPosition position, StatBlock baseStats, WeaponInstance equippedWeapon)
-            : base("Player", Faction.Player, position, Direction.Right, baseStats)
+            : base("プレイヤー", Faction.Player, position, Direction.Right, baseStats)
         {
             EquippedWeapon = equippedWeapon;
             RestoreVitals();

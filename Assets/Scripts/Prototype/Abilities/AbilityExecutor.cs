@@ -23,7 +23,7 @@ namespace WeaponMazeAlchemy.Prototype
 
             if (!caster.SpendMp(ability.MpCost))
             {
-                log?.Invoke($"{caster.ActorName} does not have enough MP.");
+                log?.Invoke($"{caster.ActorName}はMPが足りない");
                 return false;
             }
 
@@ -52,6 +52,12 @@ namespace WeaponMazeAlchemy.Prototype
                 GridPosition targetPosition = new GridPosition(
                     caster.Position.X + offset.X * step,
                     caster.Position.Y + offset.Y * step);
+                if (map.IsWall(targetPosition))
+                {
+                    log?.Invoke($"{caster.ActorName}の{ability.DisplayName}！ しかし壁に阻まれた");
+                    return;
+                }
+
                 Actor target = map.GetActorAt(targetPosition);
                 if (target == null || !target.IsOpponentOf(caster))
                 {
@@ -62,7 +68,7 @@ namespace WeaponMazeAlchemy.Prototype
                 return;
             }
 
-            log?.Invoke($"{caster.ActorName} uses {ability.DisplayName}, but hits nothing.");
+            log?.Invoke($"{caster.ActorName}の{ability.DisplayName}！ しかし何も当たらなかった");
         }
 
         private void ExecuteAreaAttack(Actor caster, AbilityDefinition ability, GridMap map)
@@ -70,7 +76,7 @@ namespace WeaponMazeAlchemy.Prototype
             List<Actor> targets = map.GetOpponentsInArea(caster, caster.Position, Mathf.Max(1, ability.Radius)).ToList();
             if (targets.Count == 0)
             {
-                log?.Invoke($"{caster.ActorName} uses {ability.DisplayName}, but no target is nearby.");
+                log?.Invoke($"{caster.ActorName}の{ability.DisplayName}！ しかし周囲に敵はいない");
                 return;
             }
 
@@ -84,7 +90,7 @@ namespace WeaponMazeAlchemy.Prototype
         {
             int healAmount = Mathf.Max(1, Mathf.RoundToInt(caster.GetTotalStats().Attack * (ability.PowerPercent / 100f)));
             int applied = caster.Heal(healAmount);
-            log?.Invoke($"{caster.ActorName} uses {ability.DisplayName} and heals {applied} HP.");
+            log?.Invoke($"HP回復アビリティ！ HPを {applied} 回復");
         }
 
         private void DealDamage(Actor caster, Actor target, AbilityDefinition ability)
@@ -92,13 +98,13 @@ namespace WeaponMazeAlchemy.Prototype
             DamageResult result = DamageCalculator.Calculate(caster, target, ability.PowerPercent, ability.ElementType);
             if (result.IsEvaded)
             {
-                log?.Invoke($"{target.ActorName} evades {ability.DisplayName}.");
+                log?.Invoke($"{target.ActorName}は{ability.DisplayName}を回避！");
                 return;
             }
 
             target.TakeDamage(result.Amount);
-            string criticalText = result.IsCritical ? " Critical!" : string.Empty;
-            log?.Invoke($"{caster.ActorName} uses {ability.DisplayName} on {target.ActorName}: {result.Amount} damage.{criticalText}");
+            string criticalText = result.IsCritical ? " 会心！" : string.Empty;
+            log?.Invoke($"{caster.ActorName}の{ability.DisplayName}！{criticalText} {target.ActorName}に {result.Amount} ダメージ");
         }
     }
 }

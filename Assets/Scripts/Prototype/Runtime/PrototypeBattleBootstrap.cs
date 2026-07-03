@@ -7,7 +7,9 @@ namespace WeaponMazeAlchemy.Prototype
 {
     public class PrototypeBattleBootstrap : MonoBehaviour
     {
-        private const int MaxLogLines = 8;
+        private const int MaxLogLines = 24;
+        private const int VisibleLogLines = 10;
+        private const float LogLineHeight = 20f;
 
         private readonly List<string> logLines = new List<string>();
         private BattleController battle;
@@ -46,6 +48,26 @@ namespace WeaponMazeAlchemy.Prototype
 
             if (battle == null || battle.IsBattleOver)
             {
+                return;
+            }
+
+            if (battle.IsWeaponChoiceActive)
+            {
+                bool choiceChanged = false;
+                if (WasPressed(Keyboard.current.eKey))
+                {
+                    choiceChanged = battle.TryEquipPendingWeapon();
+                }
+                else if (WasPressed(Keyboard.current.qKey))
+                {
+                    choiceChanged = battle.TryCloseWeaponChoice();
+                }
+
+                if (choiceChanged)
+                {
+                    view.Render();
+                }
+
                 return;
             }
 
@@ -89,8 +111,8 @@ namespace WeaponMazeAlchemy.Prototype
                 return;
             }
 
-            GUI.Box(new Rect(10, 10, 420, 204), string.Empty);
-            GUILayout.BeginArea(new Rect(20, 18, 400, 186));
+            GUI.Box(new Rect(10, 10, 430, 224), string.Empty);
+            GUILayout.BeginArea(new Rect(20, 18, 410, 206));
             PlayerActor player = battle.Player;
             WeaponInstance weapon = player.EquippedWeapon;
             GUILayout.Label($"HP {player.CurrentHp}/{player.MaxHp}   MP {player.CurrentMp}/{player.MaxMp}");
@@ -101,13 +123,95 @@ namespace WeaponMazeAlchemy.Prototype
             GUILayout.Label($"Dropped Weapons {battle.WeaponDrops.Count}");
             GUILayout.EndArea();
 
-            GUI.Box(new Rect(10, Screen.height - 182, 560, 172), string.Empty);
-            GUILayout.BeginArea(new Rect(20, Screen.height - 174, 540, 154));
-            foreach (string line in logLines)
+            DrawEnemyStatusPanel();
+            DrawWeaponChoicePanel();
+            DrawLogPanel();
+        }
+
+        private void DrawLogPanel()
+        {
+            float width = 700f;
+            float height = VisibleLogLines * LogLineHeight + 20f;
+            Rect panelRect = new Rect(10f, Screen.height - height - 10f, width, height);
+            GUI.Box(panelRect, string.Empty);
+
+            int firstLine = Mathf.Max(0, logLines.Count - VisibleLogLines);
+            int visibleCount = logLines.Count - firstLine;
+            for (int i = 0; i < visibleCount; i++)
             {
-                GUILayout.Label(line);
+                Rect lineRect = new Rect(panelRect.x + 10f, panelRect.y + 8f + i * LogLineHeight, width - 20f, LogLineHeight);
+                GUI.Label(lineRect, logLines[firstLine + i]);
+            }
+        }
+
+        private void DrawEnemyStatusPanel()
+        {
+            float width = 300f;
+            GUI.Box(new Rect(Screen.width - width - 10f, 10f, width, 112f), string.Empty);
+            GUILayout.BeginArea(new Rect(Screen.width - width, 18f, width - 20f, 96f));
+            GUILayout.Label("敵HP");
+            foreach (EnemyActor enemy in battle.Enemies)
+            {
+                string state = enemy.IsAlive ? $"{enemy.CurrentHp}/{enemy.MaxHp}" : "撃破";
+                GUILayout.Label($"{enemy.ActorName}: {state}");
             }
             GUILayout.EndArea();
+        }
+
+        private void DrawWeaponChoicePanel()
+        {
+            WeaponDrop pendingDrop = battle.PendingWeaponDrop;
+            if (pendingDrop == null)
+            {
+                return;
+            }
+
+            float width = Mathf.Min(760f, Screen.width - 40f);
+            float height = Mathf.Min(560f, Screen.height - 80f);
+            Rect rect = new Rect((Screen.width - width) * 0.5f, (Screen.height - height) * 0.5f, width, height);
+            GUI.Box(rect, string.Empty);
+
+            GUILayout.BeginArea(new Rect(rect.x + 16f, rect.y + 12f, rect.width - 32f, rect.height - 24f));
+            GUILayout.Label("落ちている武器");
+            GUILayout.Label("E: 拾って装備   Q: 拾わず閉じる");
+            GUILayout.Label("表示: 現在の武器 → 落ちている武器 (差分)");
+            GUILayout.Space(8f);
+
+            WeaponInstance current = battle.Player.EquippedWeapon;
+            WeaponInstance dropped = pendingDrop.Weapon;
+            StatBlock currentStats = current.CurrentStats;
+            StatBlock droppedStats = dropped.CurrentStats;
+
+            DrawComparisonLine("ランク", current.Rank, dropped.Rank);
+            DrawComparisonLine("レベル", current.Level, dropped.Level);
+            DrawComparisonLine("経験値", current.Experience, dropped.Experience);
+            DrawComparisonLine("攻撃力", currentStats.Attack, droppedStats.Attack);
+            DrawComparisonLine("防御力", currentStats.Defense, droppedStats.Defense);
+            DrawComparisonLine("HP", currentStats.Hp, droppedStats.Hp);
+            DrawComparisonLine("MP", currentStats.Mp, droppedStats.Mp);
+            DrawComparisonLine("会心率", currentStats.CriticalRate, droppedStats.CriticalRate, "%");
+            DrawComparisonLine("会心ダメージ", currentStats.CriticalDamage, droppedStats.CriticalDamage, "%");
+            DrawComparisonLine("属性ダメージバフ", currentStats.ElementalDamageBuff, droppedStats.ElementalDamageBuff, "%");
+            DrawComparisonLine("回避率", currentStats.EvasionRate, droppedStats.EvasionRate, "%");
+            DrawComparisonLine("成長率", current.GrowthRatePercent, dropped.GrowthRatePercent, "%");
+            DrawComparisonLine("汎用アビリティ枠数", current.GenericAbilitySlotCount, dropped.GenericAbilitySlotCount);
+            GUILayout.Space(6f);
+            DrawTextComparisonLine("固有アビリティ名", current.UniqueAbility.DisplayName, dropped.UniqueAbility.DisplayName);
+            DrawComparisonLine("固有アビリティ消費MP", current.UniqueAbility.MpCost, dropped.UniqueAbility.MpCost);
+            DrawComparisonLine("固有アビリティ倍率", current.UniqueAbility.PowerPercent, dropped.UniqueAbility.PowerPercent, "%");
+            GUILayout.EndArea();
+        }
+
+        private void DrawComparisonLine(string label, int currentValue, int droppedValue, string suffix = "")
+        {
+            int diff = droppedValue - currentValue;
+            string diffText = diff > 0 ? $"+{diff}" : diff.ToString();
+            GUILayout.Label($"{label}: {currentValue}{suffix} → {droppedValue}{suffix} ({diffText}{suffix})");
+        }
+
+        private void DrawTextComparisonLine(string label, string currentValue, string droppedValue)
+        {
+            GUILayout.Label($"{label}: {currentValue} → {droppedValue}");
         }
 
         private void SetupBattle()
@@ -119,8 +223,8 @@ namespace WeaponMazeAlchemy.Prototype
             SetupCamera();
 
             WeaponInstance weapon = battle.Player.EquippedWeapon;
-            AddLog($"New battle. Weapon Rank {weapon.Rank}, Ability {weapon.UniqueAbility.DisplayName}.");
-            AddLog($"Player HP {battle.Player.MaxHp}, MP {battle.Player.MaxMp}, ATK {battle.Player.GetTotalStats().Attack}.");
+            AddLog($"戦闘開始。初期武器 ランク {weapon.Rank}, 固有 {weapon.UniqueAbility.DisplayName}");
+            AddLog($"プレイヤー HP {battle.Player.MaxHp}, MP {battle.Player.MaxMp}, 攻撃力 {battle.Player.GetTotalStats().Attack}");
         }
 
         private void SetupCamera()

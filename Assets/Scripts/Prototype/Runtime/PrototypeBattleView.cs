@@ -84,14 +84,18 @@ namespace WeaponMazeAlchemy.Prototype
                     GameObject tile = new GameObject($"Tile {x},{y}");
                     tile.transform.SetParent(transform);
                     tile.transform.position = new GridPosition(x, y).ToWorldPosition(CellSize);
-                    tile.transform.localScale = Vector3.one * 0.95f;
+                    GridPosition position = new GridPosition(x, y);
+                    bool isWall = battle.Map.IsWall(position);
+                    tile.transform.localScale = Vector3.one * (isWall ? 0.98f : 0.95f);
 
                     SpriteRenderer renderer = tile.AddComponent<SpriteRenderer>();
                     renderer.sprite = GetSquareSprite();
-                    renderer.color = (x + y) % 2 == 0
-                        ? new Color(0.16f, 0.18f, 0.2f)
-                        : new Color(0.12f, 0.14f, 0.16f);
-                    renderer.sortingOrder = 0;
+                    renderer.color = isWall
+                        ? new Color(0.04f, 0.045f, 0.05f)
+                        : (x + y) % 2 == 0
+                            ? new Color(0.16f, 0.18f, 0.2f)
+                            : new Color(0.12f, 0.14f, 0.16f);
+                    renderer.sortingOrder = isWall ? 1 : 0;
                 }
             }
         }

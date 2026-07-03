@@ -12,6 +12,7 @@ namespace WeaponMazeAlchemy.Prototype
         private readonly WeaponGenerator weaponGenerator;
         private readonly List<EnemyActor> enemies = new List<EnemyActor>();
         private readonly List<WeaponDrop> weaponDrops = new List<WeaponDrop>();
+        private WeaponDrop pendingWeaponDrop;
 
         public BattleController(GridMap map, PlayerActor player, IEnumerable<EnemyActor> enemies)
         {
@@ -36,70 +37,130 @@ namespace WeaponMazeAlchemy.Prototype
         public PlayerActor Player { get; }
         public IReadOnlyList<EnemyActor> Enemies => enemies;
         public IReadOnlyList<WeaponDrop> WeaponDrops => weaponDrops;
+        public WeaponDrop PendingWeaponDrop => pendingWeaponDrop;
+        public bool IsWeaponChoiceActive => pendingWeaponDrop != null;
         public bool IsBattleOver => !Player.IsAlive || enemies.All(enemy => !enemy.IsAlive);
 
         public static BattleController CreateDefault()
         {
+            string[] layout =
+            {
+                "##########",
+                "#P.......#",
+                "#..##....#",
+                "#........#",
+                "#....##..#",
+                "#..E...E.#",
+                "##########"
+            };
+
             WeaponGenerator weaponGenerator = new WeaponGenerator();
             WeaponInstance weapon = weaponGenerator.GenerateForDungeon(1, 5);
             StatBlock playerBaseStats = new StatBlock(100, 30, 10, 5, 5, 150, 0, 0);
-            PlayerActor player = new PlayerActor(new GridPosition(1, 1), playerBaseStats, weapon);
+            GridMap map = new GridMap(layout[0].Length, layout.Length);
+            GridPosition playerPosition = new GridPosition(1, 1);
+            List<EnemyActor> enemies = new List<EnemyActor>();
 
-            List<EnemyActor> enemies = new List<EnemyActor>
+            int enemyIndex = 1;
+            for (int row = 0; row < layout.Length; row++)
             {
-                new EnemyActor("Slime A", new GridPosition(5, 1), new StatBlock(45, 0, 9, 2, 0, 100, 0, 0)),
-                new EnemyActor("Slime B", new GridPosition(5, 4), new StatBlock(55, 0, 11, 3, 0, 100, 0, 0))
-            };
+                int y = layout.Length - 1 - row;
+                for (int x = 0; x < layout[row].Length; x++)
+                {
+                    GridPosition position = new GridPosition(x, y);
+                    char tile = layout[row][x];
+                    if (tile == '#')
+                    {
+                        map.SetWall(position, true);
+                    }
+                    else if (tile == 'P')
+                    {
+                        playerPosition = position;
+                    }
+                    else if (tile == 'E')
+                    {
+                        enemies.Add(new EnemyActor($"スライム{enemyIndex}", position, new StatBlock(50 + enemyIndex * 5, 0, 9 + enemyIndex, 2 + enemyIndex, 0, 100, 0, 0)));
+                        enemyIndex++;
+                    }
+                }
+            }
 
-            BattleController battle = new BattleController(new GridMap(8, 6), player, enemies);
-            battle.Log($"Weapon generated: Rank {weapon.Rank}, Lv {weapon.Level}, Ability {weapon.UniqueAbility.DisplayName}");
-            battle.Log($"Stats with weapon: HP {player.MaxHp}, MP {player.MaxMp}, ATK {player.GetTotalStats().Attack}, DEF {player.GetTotalStats().Defense}");
+            PlayerActor player = new PlayerActor(playerPosition, playerBaseStats, weapon);
+            BattleController battle = new BattleController(map, player, enemies);
+            battle.Log($"初期武器: ランク {weapon.Rank}, Lv {weapon.Level}, 固有アビリティ {weapon.UniqueAbility.DisplayName}");
+            battle.Log($"現在ステータス: HP {player.MaxHp}, MP {player.MaxMp}, 攻撃力 {player.GetTotalStats().Attack}, 防御力 {player.GetTotalStats().Defense}");
+            battle.Log("固定テスト部屋を生成した。# は壁");
             return battle;
         }
 
         public bool TryMovePlayer(Direction direction)
         {
-            return turnManager.TryRunPlayerAction(
-                () =>
-                {
-                    Player.Face(direction);
-                    bool moved = Map.TryMoveActor(Player, direction);
-                    Log(moved ? $"Player moves {direction}." : $"Player cannot move {direction}.");
-                    if (moved)
-                    {
-                        TryPickupWeaponAtPlayerPosition();
-                    }
-
-                    return moved;
-                },
-                RunEnemyTurn);
-        }
-
-        public bool TryFacePlayer(Direction direction)
-        {
-            if (IsBattleOver || Player.Direction == direction)
+            if (!turnManager.IsPlayerTurn || IsBattleOver || IsWeaponChoiceActive)
             {
                 return false;
             }
 
             Player.Face(direction);
-            Log($"Player turns {direction}.");
+            GridPosition targetPosition = Player.Position + direction.ToGridOffset();
+            if (Map.IsWall(targetPosition))
+            {
+                Log("壁があるため移動できない");
+                return false;
+            }
+
+            bool moved = Map.TryMoveActor(Player, direction);
+            Log(moved ? $"プレイヤーは {direction} に移動した" : $"そのマスには誰かがいるため移動できない");
+            if (!moved)
+            {
+                return false;
+            }
+
+            BeginWeaponChoiceAtPlayerPosition();
+            if (!IsWeaponChoiceActive)
+            {
+                RunEnemyTurn();
+            }
+
+            return true;
+        }
+
+        public bool TryFacePlayer(Direction direction)
+        {
+            if (IsBattleOver || IsWeaponChoiceActive || Player.Direction == direction)
+            {
+                return false;
+            }
+
+            Player.Face(direction);
+            Log($"プレイヤーは {direction} を向いた");
             return true;
         }
 
         public bool TryPlayerNormalAttack()
         {
+            if (IsWeaponChoiceActive)
+            {
+                return false;
+            }
+
             return turnManager.TryRunPlayerAction(
                 () =>
                 {
-                    Actor target = Map.GetActorAt(Player.Position + Player.Direction.ToGridOffset());
-                    if (target == null || !target.IsOpponentOf(Player))
+                    GridPosition targetPosition = Player.Position + Player.Direction.ToGridOffset();
+                    if (Map.IsWall(targetPosition))
                     {
-                        Log("Player attacks, but there is no enemy ahead.");
+                        Log("プレイヤーの通常攻撃！ しかし壁に阻まれた");
                         return true;
                     }
 
-                    DealDamage(Player, target, 100, ElementType.Physical, "normal attack");
+                    Actor target = Map.GetActorAt(targetPosition);
+                    if (target == null || !target.IsOpponentOf(Player))
+                    {
+                        Log("プレイヤーの通常攻撃！ しかし前方に敵はいない");
+                        return true;
+                    }
+
+                    DealDamage(Player, target, 100, ElementType.Physical, "通常攻撃");
                     CleanupAfterPlayerAction();
                     return true;
                 },
@@ -108,6 +169,11 @@ namespace WeaponMazeAlchemy.Prototype
 
         public bool TryUseUniqueAbility()
         {
+            if (IsWeaponChoiceActive)
+            {
+                return false;
+            }
+
             return turnManager.TryRunPlayerAction(
                 () =>
                 {
@@ -137,7 +203,7 @@ namespace WeaponMazeAlchemy.Prototype
                 if (enemy.ManhattanDistanceTo(Player) == 1)
                 {
                     FaceTarget(enemy, Player.Position);
-                    DealDamage(enemy, Player, 100, ElementType.Physical, "claw");
+                    DealDamage(enemy, Player, 100, ElementType.Physical, "攻撃");
                     continue;
                 }
 
@@ -156,15 +222,31 @@ namespace WeaponMazeAlchemy.Prototype
                 ? Player.Position.Y >= enemy.Position.Y ? Direction.Up : Direction.Down
                 : Player.Position.X >= enemy.Position.X ? Direction.Right : Direction.Left;
 
-            if (Map.TryMoveActor(enemy, primary))
+            List<Direction> candidates = new List<Direction>();
+            AddDirectionCandidate(candidates, primary);
+            AddDirectionCandidate(candidates, secondary);
+            AddDirectionCandidate(candidates, Direction.Up);
+            AddDirectionCandidate(candidates, Direction.Right);
+            AddDirectionCandidate(candidates, Direction.Down);
+            AddDirectionCandidate(candidates, Direction.Left);
+
+            foreach (Direction direction in candidates)
             {
-                Log($"{enemy.ActorName} moves {primary}.");
-                return;
+                if (Map.TryMoveActor(enemy, direction))
+                {
+                    Log($"{enemy.ActorName} は {direction} に移動した");
+                    return;
+                }
             }
 
-            if (Map.TryMoveActor(enemy, secondary))
+            Log($"{enemy.ActorName} は壁や他のキャラに阻まれて動けない");
+        }
+
+        private static void AddDirectionCandidate(List<Direction> candidates, Direction direction)
+        {
+            if (!candidates.Contains(direction))
             {
-                Log($"{enemy.ActorName} moves {secondary}.");
+                candidates.Add(direction);
             }
         }
 
@@ -173,13 +255,17 @@ namespace WeaponMazeAlchemy.Prototype
             DamageResult result = DamageCalculator.Calculate(attacker, target, powerPercent, elementType);
             if (result.IsEvaded)
             {
-                Log($"{target.ActorName} evades {attacker.ActorName}'s {actionName}.");
+                Log(attacker.Faction == Faction.Player
+                    ? $"{target.ActorName} は {attacker.ActorName} の {actionName} を回避！"
+                    : $"{attacker.ActorName} の {actionName}！ {target.ActorName} は攻撃を回避！");
                 return;
             }
 
             target.TakeDamage(result.Amount);
-            string criticalText = result.IsCritical ? " Critical!" : string.Empty;
-            Log($"{attacker.ActorName} uses {actionName} on {target.ActorName}: {result.Amount} damage.{criticalText}");
+            string criticalText = result.IsCritical ? " 会心！" : string.Empty;
+            Log(attacker.Faction == Faction.Player
+                ? $"{attacker.ActorName}の{actionName}！{criticalText} {target.ActorName}に {result.Amount} ダメージ"
+                : $"{attacker.ActorName}の{actionName}！{criticalText} {target.ActorName}に {result.Amount} ダメージ");
             CleanupAfterPlayerAction();
         }
 
@@ -187,8 +273,9 @@ namespace WeaponMazeAlchemy.Prototype
         {
             foreach (EnemyActor defeated in enemies.Where(enemy => !enemy.IsAlive && Map.Actors.Contains(enemy)).ToList())
             {
-                Log($"{defeated.ActorName} is defeated.");
+                Log($"{defeated.ActorName}を倒した！");
                 Player.EquippedWeapon?.AddExperience(10);
+                Log("装備武器に経験値 +10");
                 DropWeapon(defeated.Position);
             }
 
@@ -200,10 +287,38 @@ namespace WeaponMazeAlchemy.Prototype
             WeaponInstance weapon = weaponGenerator.GenerateForDungeon(1, 5);
             WeaponDrop drop = new WeaponDrop(position, weapon);
             weaponDrops.Add(drop);
-            Log($"Weapon dropped: Rank {weapon.Rank}, Lv {weapon.Level}, ATK {weapon.CurrentStats.Attack}, Ability {weapon.UniqueAbility.DisplayName}.");
+            Log($"武器がドロップした: ランク {weapon.Rank}, Lv {weapon.Level}, 攻撃力 {weapon.CurrentStats.Attack}, 固有 {weapon.UniqueAbility.DisplayName}");
         }
 
-        private void TryPickupWeaponAtPlayerPosition()
+        public bool TryEquipPendingWeapon()
+        {
+            if (pendingWeaponDrop == null)
+            {
+                return false;
+            }
+
+            Player.Equip(pendingWeaponDrop.Weapon);
+            weaponDrops.Remove(pendingWeaponDrop);
+            pendingWeaponDrop = null;
+
+            WeaponInstance weapon = Player.EquippedWeapon;
+            Log($"武器を拾って装備した: ランク {weapon.Rank}, Lv {weapon.Level}, 攻撃力 {weapon.CurrentStats.Attack}, 固有 {weapon.UniqueAbility.DisplayName}");
+            return true;
+        }
+
+        public bool TryCloseWeaponChoice()
+        {
+            if (pendingWeaponDrop == null)
+            {
+                return false;
+            }
+
+            Log("落ちている武器を拾わず、その場に残した");
+            pendingWeaponDrop = null;
+            return true;
+        }
+
+        private void BeginWeaponChoiceAtPlayerPosition()
         {
             WeaponDrop drop = weaponDrops.FirstOrDefault(weaponDrop => weaponDrop.Position == Player.Position);
             if (drop == null)
@@ -211,10 +326,8 @@ namespace WeaponMazeAlchemy.Prototype
                 return;
             }
 
-            Player.Equip(drop.Weapon);
-            weaponDrops.Remove(drop);
-            WeaponInstance weapon = Player.EquippedWeapon;
-            Log($"Equipped weapon: Rank {weapon.Rank}, Lv {weapon.Level}, ATK {weapon.CurrentStats.Attack}, Ability {weapon.UniqueAbility.DisplayName}.");
+            pendingWeaponDrop = drop;
+            Log("落ちている武器を発見！ Eで装備 / Qで拾わない");
         }
 
         private void FaceTarget(Actor actor, GridPosition targetPosition)
@@ -234,13 +347,13 @@ namespace WeaponMazeAlchemy.Prototype
         {
             if (!Player.IsAlive)
             {
-                Log("Player is defeated.");
+                Log("プレイヤーは倒れた");
                 return;
             }
 
             if (enemies.All(enemy => !enemy.IsAlive))
             {
-                Log("All enemies defeated.");
+                Log("すべての敵を倒した！");
             }
         }
 

@@ -6,6 +6,7 @@ namespace WeaponMazeAlchemy.Prototype
     public class GridMap
     {
         private readonly List<Actor> actors = new List<Actor>();
+        private readonly HashSet<GridPosition> walls = new HashSet<GridPosition>();
 
         public GridMap(int width, int height)
         {
@@ -16,6 +17,7 @@ namespace WeaponMazeAlchemy.Prototype
         public int Width { get; }
         public int Height { get; }
         public IReadOnlyList<Actor> Actors => actors;
+        public IReadOnlyCollection<GridPosition> WallPositions => walls;
 
         public bool IsInBounds(GridPosition position)
         {
@@ -27,9 +29,36 @@ namespace WeaponMazeAlchemy.Prototype
             return actors.FirstOrDefault(actor => actor.IsAlive && actor.Position == position);
         }
 
+        public bool IsWall(GridPosition position)
+        {
+            return !IsInBounds(position) || walls.Contains(position);
+        }
+
+        public bool IsWalkable(GridPosition position)
+        {
+            return IsInBounds(position) && !walls.Contains(position);
+        }
+
+        public void SetWall(GridPosition position, bool isWall)
+        {
+            if (!IsInBounds(position))
+            {
+                return;
+            }
+
+            if (isWall)
+            {
+                walls.Add(position);
+            }
+            else
+            {
+                walls.Remove(position);
+            }
+        }
+
         public bool CanMoveTo(GridPosition position)
         {
-            return IsInBounds(position) && GetActorAt(position) == null;
+            return IsWalkable(position) && GetActorAt(position) == null;
         }
 
         public bool AddActor(Actor actor)
