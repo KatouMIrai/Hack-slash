@@ -86,16 +86,13 @@ namespace WeaponMazeAlchemy.Prototype
                     tile.transform.position = new GridPosition(x, y).ToWorldPosition(CellSize);
                     GridPosition position = new GridPosition(x, y);
                     bool isWall = battle.Map.IsWall(position);
+                    bool isStairs = position == battle.StairsPosition;
                     tile.transform.localScale = Vector3.one * (isWall ? 0.98f : 0.95f);
 
                     SpriteRenderer renderer = tile.AddComponent<SpriteRenderer>();
                     renderer.sprite = GetSquareSprite();
-                    renderer.color = isWall
-                        ? new Color(0.04f, 0.045f, 0.05f)
-                        : (x + y) % 2 == 0
-                            ? new Color(0.16f, 0.18f, 0.2f)
-                            : new Color(0.12f, 0.14f, 0.16f);
-                    renderer.sortingOrder = isWall ? 1 : 0;
+                    renderer.color = GetTileColor(x, y, isWall, isStairs);
+                    renderer.sortingOrder = isWall ? 1 : isStairs ? 2 : 0;
                 }
             }
         }
@@ -156,6 +153,23 @@ namespace WeaponMazeAlchemy.Prototype
         {
             dropObject.SetActive(true);
             dropObject.transform.position = weaponDrop.Position.ToWorldPosition(CellSize) + new Vector3(0f, 0f, -0.02f);
+        }
+
+        private static Color GetTileColor(int x, int y, bool isWall, bool isStairs)
+        {
+            if (isWall)
+            {
+                return new Color(0.04f, 0.045f, 0.05f);
+            }
+
+            if (isStairs)
+            {
+                return new Color(0.25f, 0.8f, 0.45f);
+            }
+
+            return (x + y) % 2 == 0
+                ? new Color(0.16f, 0.18f, 0.2f)
+                : new Color(0.12f, 0.14f, 0.16f);
         }
 
         private static Sprite GetSquareSprite()

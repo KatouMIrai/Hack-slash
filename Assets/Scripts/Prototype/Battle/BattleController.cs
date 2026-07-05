@@ -7,17 +7,25 @@ namespace WeaponMazeAlchemy.Prototype
 {
     public class BattleController
     {
+        private const int DungeonDifficulty = 1;
+        private const int StartingFloor = 1;
+
         private readonly TurnManager turnManager = new TurnManager();
         private readonly AbilityExecutor abilityExecutor;
         private readonly WeaponGenerator weaponGenerator;
         private readonly List<EnemyActor> enemies = new List<EnemyActor>();
         private readonly List<WeaponDrop> weaponDrops = new List<WeaponDrop>();
+        private bool floorClearedLogged;
+        private string currentTemplateName;
         private WeaponDrop pendingWeaponDrop;
 
-        public BattleController(GridMap map, PlayerActor player, IEnumerable<EnemyActor> enemies)
+        public BattleController(GridMap map, PlayerActor player, IEnumerable<EnemyActor> enemies, GridPosition stairsPosition, int currentFloor, string currentTemplateName)
         {
             Map = map;
             Player = player;
+            StairsPosition = stairsPosition;
+            CurrentFloor = currentFloor;
+            this.currentTemplateName = currentTemplateName;
             weaponGenerator = new WeaponGenerator();
             abilityExecutor = new AbilityExecutor(Log);
 
@@ -32,64 +40,30 @@ namespace WeaponMazeAlchemy.Prototype
         }
 
         public event Action<string> LogEmitted;
+        public event Action FloorChanged;
 
-        public GridMap Map { get; }
+        public GridMap Map { get; private set; }
         public PlayerActor Player { get; }
+        public int CurrentFloor { get; private set; }
+        public GridPosition StairsPosition { get; private set; }
+        public string CurrentTemplateName => currentTemplateName;
         public IReadOnlyList<EnemyActor> Enemies => enemies;
         public IReadOnlyList<WeaponDrop> WeaponDrops => weaponDrops;
         public WeaponDrop PendingWeaponDrop => pendingWeaponDrop;
         public bool IsWeaponChoiceActive => pendingWeaponDrop != null;
-        public bool IsBattleOver => !Player.IsAlive || enemies.All(enemy => !enemy.IsAlive);
+        public bool IsBattleOver => !Player.IsAlive;
 
         public static BattleController CreateDefault()
         {
-            string[] layout =
-            {
-                "##########",
-                "#P.......#",
-                "#..##....#",
-                "#........#",
-                "#....##..#",
-                "#..E...E.#",
-                "##########"
-            };
-
+            FloorBuildResult floor = BuildFloor(StartingFloor);
             WeaponGenerator weaponGenerator = new WeaponGenerator();
-            WeaponInstance weapon = weaponGenerator.GenerateForDungeon(1, 5);
+            WeaponInstance weapon = weaponGenerator.GenerateForDungeon(DungeonDifficulty, StartingFloor);
             StatBlock playerBaseStats = new StatBlock(100, 30, 10, 5, 5, 150, 0, 0);
-            GridMap map = new GridMap(layout[0].Length, layout.Length);
-            GridPosition playerPosition = new GridPosition(1, 1);
-            List<EnemyActor> enemies = new List<EnemyActor>();
-
-            int enemyIndex = 1;
-            for (int row = 0; row < layout.Length; row++)
-            {
-                int y = layout.Length - 1 - row;
-                for (int x = 0; x < layout[row].Length; x++)
-                {
-                    GridPosition position = new GridPosition(x, y);
-                    char tile = layout[row][x];
-                    if (tile == '#')
-                    {
-                        map.SetWall(position, true);
-                    }
-                    else if (tile == 'P')
-                    {
-                        playerPosition = position;
-                    }
-                    else if (tile == 'E')
-                    {
-                        enemies.Add(new EnemyActor($"スライム{enemyIndex}", position, new StatBlock(50 + enemyIndex * 5, 0, 9 + enemyIndex, 2 + enemyIndex, 0, 100, 0, 0)));
-                        enemyIndex++;
-                    }
-                }
-            }
-
-            PlayerActor player = new PlayerActor(playerPosition, playerBaseStats, weapon);
-            BattleController battle = new BattleController(map, player, enemies);
+            PlayerActor player = new PlayerActor(floor.PlayerPosition, playerBaseStats, weapon);
+            BattleController battle = new BattleController(floor.Map, player, floor.Enemies, floor.StairsPosition, StartingFloor, floor.Template.Name);
             battle.Log($"初期武器: ランク {weapon.Rank}, Lv {weapon.Level}, 固有アビリティ {weapon.UniqueAbility.DisplayName}");
             battle.Log($"現在ステータス: HP {player.MaxHp}, MP {player.MaxMp}, 攻撃力 {player.GetTotalStats().Attack}, 防御力 {player.GetTotalStats().Defense}");
-            battle.Log("固定テスト部屋を生成した。# は壁");
+            battle.Log($"Floor {battle.CurrentFloor}: フロアテンプレート「{floor.Template.Name}」を生成した。S は階段");
             return battle;
         }
 
@@ -116,6 +90,12 @@ namespace WeaponMazeAlchemy.Prototype
             }
 
             BeginWeaponChoiceAtPlayerPosition();
+            if (Player.Position == StairsPosition)
+            {
+                AdvanceToNextFloor();
+                return true;
+            }
+
             if (!IsWeaponChoiceActive)
             {
                 RunEnemyTurn();
@@ -232,6 +212,12 @@ namespace WeaponMazeAlchemy.Prototype
 
             foreach (Direction direction in candidates)
             {
+                GridPosition targetPosition = enemy.Position + direction.ToGridOffset();
+                if (targetPosition == StairsPosition)
+                {
+                    continue;
+                }
+
                 if (Map.TryMoveActor(enemy, direction))
                 {
                     Log($"{enemy.ActorName} は {direction} に移動した");
@@ -284,7 +270,13 @@ namespace WeaponMazeAlchemy.Prototype
 
         private void DropWeapon(GridPosition position)
         {
-            WeaponInstance weapon = weaponGenerator.GenerateForDungeon(1, 5);
+            if (position == StairsPosition)
+            {
+                Log("階段の上なので武器はドロップしなかった");
+                return;
+            }
+
+            WeaponInstance weapon = weaponGenerator.GenerateForDungeon(DungeonDifficulty, CurrentFloor);
             WeaponDrop drop = new WeaponDrop(position, weapon);
             weaponDrops.Add(drop);
             Log($"武器がドロップした: ランク {weapon.Rank}, Lv {weapon.Level}, 攻撃力 {weapon.CurrentStats.Attack}, 固有 {weapon.UniqueAbility.DisplayName}");
@@ -351,15 +343,135 @@ namespace WeaponMazeAlchemy.Prototype
                 return;
             }
 
-            if (enemies.All(enemy => !enemy.IsAlive))
+            if (!floorClearedLogged && enemies.All(enemy => !enemy.IsAlive))
             {
-                Log("すべての敵を倒した！");
+                floorClearedLogged = true;
+                Log("すべての敵を倒した！ 階段へ向かおう");
             }
+        }
+
+        private void AdvanceToNextFloor()
+        {
+            CurrentFloor++;
+            FloorBuildResult floor = BuildFloor(CurrentFloor);
+
+            Map = floor.Map;
+            StairsPosition = floor.StairsPosition;
+            currentTemplateName = floor.Template.Name;
+            floorClearedLogged = false;
+            pendingWeaponDrop = null;
+            weaponDrops.Clear();
+            enemies.Clear();
+
+            Player.SetPosition(floor.PlayerPosition);
+            Player.Face(Direction.Right);
+            Player.ClampVitalsToMax();
+            Map.AddActor(Player);
+
+            foreach (EnemyActor enemy in floor.Enemies)
+            {
+                if (Map.AddActor(enemy))
+                {
+                    enemies.Add(enemy);
+                }
+            }
+
+            Log($"階段を降りて Floor {CurrentFloor} へ進んだ");
+            Log($"フロアテンプレート「{currentTemplateName}」を生成した。S は階段");
+            FloorChanged?.Invoke();
+        }
+
+        private static FloorBuildResult BuildFloor(int currentFloor)
+        {
+            FloorTemplate template = FloorTemplateDatabase.PickRandomDefault();
+            GridMap map = new GridMap(template.Width, template.Height);
+            GridPosition playerPosition = GridPosition.Zero;
+            GridPosition stairsPosition = GridPosition.Zero;
+            bool foundPlayer = false;
+            bool foundStairs = false;
+            List<EnemyActor> enemies = new List<EnemyActor>();
+
+            int enemyIndex = 1;
+            for (int row = 0; row < template.Height; row++)
+            {
+                int y = template.Height - 1 - row;
+                string layoutRow = template.Rows[row];
+                for (int x = 0; x < layoutRow.Length; x++)
+                {
+                    GridPosition position = new GridPosition(x, y);
+                    char tile = layoutRow[x];
+                    if (tile == '#')
+                    {
+                        map.SetWall(position, true);
+                    }
+                    else if (tile == 'P')
+                    {
+                        playerPosition = position;
+                        foundPlayer = true;
+                    }
+                    else if (tile == 'E')
+                    {
+                        enemies.Add(CreateEnemy(enemyIndex, position, currentFloor));
+                        enemyIndex++;
+                    }
+                    else if (tile == 'S')
+                    {
+                        stairsPosition = position;
+                        foundStairs = true;
+                    }
+                }
+            }
+
+            if (!foundPlayer)
+            {
+                throw new InvalidOperationException($"Floor template '{template.Name}' does not contain a player start tile 'P'.");
+            }
+
+            if (!foundStairs)
+            {
+                throw new InvalidOperationException($"Floor template '{template.Name}' does not contain a stairs tile 'S'.");
+            }
+
+            return new FloorBuildResult(template, map, playerPosition, stairsPosition, enemies);
+        }
+
+        private static EnemyActor CreateEnemy(int enemyIndex, GridPosition position, int currentFloor)
+        {
+            int floorBonus = Mathf.Max(0, currentFloor - 1);
+            StatBlock stats = new StatBlock(
+                50 + enemyIndex * 5 + floorBonus * 5,
+                0,
+                9 + enemyIndex + floorBonus * 2,
+                2 + enemyIndex + floorBonus,
+                0,
+                100,
+                0,
+                0);
+
+            return new EnemyActor($"スライム{enemyIndex}", position, stats);
         }
 
         private void Log(string message)
         {
             LogEmitted?.Invoke(message);
+        }
+
+        private class FloorBuildResult
+        {
+            public FloorBuildResult(FloorTemplate template, GridMap map, GridPosition playerPosition, GridPosition stairsPosition, List<EnemyActor> enemies)
+            {
+                Template = template;
+                Map = map;
+                PlayerPosition = playerPosition;
+                StairsPosition = stairsPosition;
+                Enemies = enemies;
+            }
+
+            public FloorTemplate Template { get; }
+            public GridMap Map { get; }
+            public GridPosition PlayerPosition { get; }
+            public GridPosition StairsPosition { get; }
+            public List<EnemyActor> Enemies { get; }
         }
     }
 }

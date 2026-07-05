@@ -115,6 +115,7 @@ namespace WeaponMazeAlchemy.Prototype
             GUILayout.BeginArea(new Rect(20, 18, 410, 206));
             PlayerActor player = battle.Player;
             WeaponInstance weapon = player.EquippedWeapon;
+            GUILayout.Label($"Floor: {battle.CurrentFloor}");
             GUILayout.Label($"HP {player.CurrentHp}/{player.MaxHp}   MP {player.CurrentMp}/{player.MaxMp}");
             GUILayout.Label($"Weapon Rank {weapon.Rank}  Lv {weapon.Level}  EXP {weapon.Experience}/{weapon.ExperienceToNextLevel()}");
             GUILayout.Label($"Weapon ATK {weapon.CurrentStats.Attack}  Growth {weapon.GrowthRatePercent}%  Slots {weapon.GenericAbilitySlotCount}");
@@ -219,12 +220,19 @@ namespace WeaponMazeAlchemy.Prototype
             logLines.Clear();
             battle = BattleController.CreateDefault();
             battle.LogEmitted += AddLog;
+            battle.FloorChanged += HandleFloorChanged;
             view.Bind(battle);
             SetupCamera();
 
             WeaponInstance weapon = battle.Player.EquippedWeapon;
-            AddLog($"戦闘開始。初期武器 ランク {weapon.Rank}, 固有 {weapon.UniqueAbility.DisplayName}");
+            AddLog($"Floor {battle.CurrentFloor} 開始。初期武器 ランク {weapon.Rank}, 固有 {weapon.UniqueAbility.DisplayName}");
             AddLog($"プレイヤー HP {battle.Player.MaxHp}, MP {battle.Player.MaxMp}, 攻撃力 {battle.Player.GetTotalStats().Attack}");
+        }
+
+        private void HandleFloorChanged()
+        {
+            view.Bind(battle);
+            SetupCamera();
         }
 
         private void SetupCamera()
