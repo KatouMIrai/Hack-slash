@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: f3a106e363834cb43875eb04d457d288
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 381872
+  packageName: Fabric Material Pack
+  packageVersion: 1.0
+  assetPath: Assets/FabricMaterialPack/HDRP/Materials/M_Fabric_wool_01.mat
+  uploadId: 920816

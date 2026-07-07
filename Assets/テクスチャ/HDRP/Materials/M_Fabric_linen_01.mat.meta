@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 9cb3badacbdda1745942d4147f770d9e
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 381872
+  packageName: Fabric Material Pack
+  packageVersion: 1.0
+  assetPath: Assets/FabricMaterialPack/HDRP/Materials/M_Fabric_linen_01.mat
+  uploadId: 920816

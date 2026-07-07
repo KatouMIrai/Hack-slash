@@ -107,7 +107,7 @@ namespace WeaponMazeAlchemy.Prototype
             body.sprite = GetSquareSprite();
             body.color = actor.Faction == Faction.Player
                 ? new Color(0.2f, 0.8f, 1f)
-                : new Color(1f, 0.25f, 0.25f);
+                : GetEnemyColor(actor);
             body.sortingOrder = 10;
 
             GameObject marker = new GameObject("Facing Marker");
@@ -120,6 +120,13 @@ namespace WeaponMazeAlchemy.Prototype
             markerRenderer.sortingOrder = 11;
 
             return actorObject;
+        }
+
+        private static Color GetEnemyColor(Actor actor)
+        {
+            return actor is EnemyActor enemy
+                ? enemy.Definition.ViewColor
+                : new Color(1f, 0.25f, 0.25f);
         }
 
         private GameObject CreateWeaponDropObject(WeaponDrop weaponDrop)

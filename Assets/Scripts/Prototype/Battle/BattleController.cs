@@ -9,12 +9,17 @@ namespace WeaponMazeAlchemy.Prototype
     {
         private const int DungeonDifficulty = 1;
         private const int StartingFloor = 1;
+        private const int EnemyHpFloorGrowth = 5;
+        private const int EnemyAttackFloorGrowth = 2;
+        private const int EnemyDefenseFloorGrowth = 1;
+        private const int InventoryWeaponCapacity = 3;
 
         private readonly TurnManager turnManager = new TurnManager();
         private readonly AbilityExecutor abilityExecutor;
         private readonly WeaponGenerator weaponGenerator;
         private readonly List<EnemyActor> enemies = new List<EnemyActor>();
         private readonly List<WeaponDrop> weaponDrops = new List<WeaponDrop>();
+        private readonly PlayerInventory inventory = new PlayerInventory(InventoryWeaponCapacity);
         private bool floorClearedLogged;
         private string currentTemplateName;
         private WeaponDrop pendingWeaponDrop;
@@ -28,6 +33,7 @@ namespace WeaponMazeAlchemy.Prototype
             this.currentTemplateName = currentTemplateName;
             weaponGenerator = new WeaponGenerator();
             abilityExecutor = new AbilityExecutor(Log);
+            InitializeInventoryFromEquippedWeapon();
 
             Map.AddActor(Player);
             foreach (EnemyActor enemy in enemies)
@@ -49,6 +55,9 @@ namespace WeaponMazeAlchemy.Prototype
         public string CurrentTemplateName => currentTemplateName;
         public IReadOnlyList<EnemyActor> Enemies => enemies;
         public IReadOnlyList<WeaponDrop> WeaponDrops => weaponDrops;
+        public IReadOnlyList<WeaponInstance> InventoryWeapons => inventory.Weapons;
+        public int MaxInventoryWeaponCount => inventory.MaxWeaponCount;
+        public int EquippedInventoryWeaponIndex => inventory.EquippedWeaponIndex;
         public WeaponDrop PendingWeaponDrop => pendingWeaponDrop;
         public bool IsWeaponChoiceActive => pendingWeaponDrop != null;
         public bool IsBattleOver => !Player.IsAlive;
@@ -78,15 +87,15 @@ namespace WeaponMazeAlchemy.Prototype
             GridPosition targetPosition = Player.Position + direction.ToGridOffset();
             if (Map.IsWall(targetPosition))
             {
-                Log("壁があるため移動できない");
-                return false;
+                Log("壁があるため移動できない。向きだけ変更した");
+                return true;
             }
 
             bool moved = Map.TryMoveActor(Player, direction);
-            Log(moved ? $"プレイヤーは {direction} に移動した" : $"そのマスには誰かがいるため移動できない");
+            Log(moved ? $"プレイヤーは {direction} に移動した" : $"そのマスには誰かがいるため移動できない。向きだけ変更した");
             if (!moved)
             {
-                return false;
+                return true;
             }
 
             BeginWeaponChoiceAtPlayerPosition();
@@ -180,35 +189,43 @@ namespace WeaponMazeAlchemy.Prototype
                     break;
                 }
 
-                if (enemy.ManhattanDistanceTo(Player) == 1)
-                {
-                    FaceTarget(enemy, Player.Position);
-                    DealDamage(enemy, Player, 100, ElementType.Physical, "攻撃");
-                    continue;
-                }
-
-                TryMoveEnemyTowardPlayer(enemy);
+                ExecuteEnemyAction(enemy);
             }
 
             AnnounceBattleState();
         }
 
+        private void ExecuteEnemyAction(EnemyActor enemy)
+        {
+            if (enemy.ShouldSkipActionThisTurn())
+            {
+                Log($"{enemy.ActorName}は様子を見ている");
+                return;
+            }
+
+            if (enemy.ManhattanDistanceTo(Player) == 1)
+            {
+                FaceTarget(enemy, Player.Position);
+                DealDamage(enemy, Player, 100, ElementType.Physical, "攻撃");
+                return;
+            }
+
+            switch (enemy.AiKind)
+            {
+                case EnemyAiKind.Aggressive:
+                    TryMoveAggressiveEnemyTowardPlayer(enemy);
+                    break;
+                case EnemyAiKind.Standard:
+                case EnemyAiKind.Slow:
+                default:
+                    TryMoveEnemyTowardPlayer(enemy);
+                    break;
+            }
+        }
+
         private void TryMoveEnemyTowardPlayer(EnemyActor enemy)
         {
-            Direction primary = Math.Abs(Player.Position.X - enemy.Position.X) >= Math.Abs(Player.Position.Y - enemy.Position.Y)
-                ? Player.Position.X >= enemy.Position.X ? Direction.Right : Direction.Left
-                : Player.Position.Y >= enemy.Position.Y ? Direction.Up : Direction.Down;
-            Direction secondary = primary == Direction.Left || primary == Direction.Right
-                ? Player.Position.Y >= enemy.Position.Y ? Direction.Up : Direction.Down
-                : Player.Position.X >= enemy.Position.X ? Direction.Right : Direction.Left;
-
-            List<Direction> candidates = new List<Direction>();
-            AddDirectionCandidate(candidates, primary);
-            AddDirectionCandidate(candidates, secondary);
-            AddDirectionCandidate(candidates, Direction.Up);
-            AddDirectionCandidate(candidates, Direction.Right);
-            AddDirectionCandidate(candidates, Direction.Down);
-            AddDirectionCandidate(candidates, Direction.Left);
+            List<Direction> candidates = BuildTowardPlayerDirectionCandidates(enemy);
 
             foreach (Direction direction in candidates)
             {
@@ -228,12 +245,73 @@ namespace WeaponMazeAlchemy.Prototype
             Log($"{enemy.ActorName} は壁や他のキャラに阻まれて動けない");
         }
 
+        private void TryMoveAggressiveEnemyTowardPlayer(EnemyActor enemy)
+        {
+            List<Direction> candidates = BuildTowardPlayerDirectionCandidates(enemy);
+            Direction bestDirection = Direction.Up;
+            int bestDistance = int.MaxValue;
+            int bestPriority = int.MaxValue;
+            bool foundMove = false;
+
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                Direction direction = candidates[i];
+                GridPosition targetPosition = enemy.Position + direction.ToGridOffset();
+                if (targetPosition == StairsPosition || !Map.CanMoveTo(targetPosition))
+                {
+                    continue;
+                }
+
+                int distance = GetManhattanDistance(targetPosition, Player.Position);
+                if (!foundMove || distance < bestDistance || distance == bestDistance && i < bestPriority)
+                {
+                    bestDirection = direction;
+                    bestDistance = distance;
+                    bestPriority = i;
+                    foundMove = true;
+                }
+            }
+
+            if (foundMove && Map.TryMoveActor(enemy, bestDirection))
+            {
+                Log($"{enemy.ActorName} は {bestDirection} に素早く移動した");
+                return;
+            }
+
+            Log($"{enemy.ActorName} は壁や他のキャラに阻まれて動けない");
+        }
+
+        private List<Direction> BuildTowardPlayerDirectionCandidates(EnemyActor enemy)
+        {
+            Direction primary = Math.Abs(Player.Position.X - enemy.Position.X) >= Math.Abs(Player.Position.Y - enemy.Position.Y)
+                ? Player.Position.X >= enemy.Position.X ? Direction.Right : Direction.Left
+                : Player.Position.Y >= enemy.Position.Y ? Direction.Up : Direction.Down;
+            Direction secondary = primary == Direction.Left || primary == Direction.Right
+                ? Player.Position.Y >= enemy.Position.Y ? Direction.Up : Direction.Down
+                : Player.Position.X >= enemy.Position.X ? Direction.Right : Direction.Left;
+
+            List<Direction> candidates = new List<Direction>();
+            AddDirectionCandidate(candidates, primary);
+            AddDirectionCandidate(candidates, secondary);
+            AddDirectionCandidate(candidates, Direction.Up);
+            AddDirectionCandidate(candidates, Direction.Right);
+            AddDirectionCandidate(candidates, Direction.Down);
+            AddDirectionCandidate(candidates, Direction.Left);
+
+            return candidates;
+        }
+
         private static void AddDirectionCandidate(List<Direction> candidates, Direction direction)
         {
             if (!candidates.Contains(direction))
             {
                 candidates.Add(direction);
             }
+        }
+
+        private static int GetManhattanDistance(GridPosition a, GridPosition b)
+        {
+            return Math.Abs(a.X - b.X) + Math.Abs(a.Y - b.Y);
         }
 
         private void DealDamage(Actor attacker, Actor target, int powerPercent, ElementType elementType, string actionName)
@@ -262,13 +340,13 @@ namespace WeaponMazeAlchemy.Prototype
                 Log($"{defeated.ActorName}を倒した！");
                 Player.EquippedWeapon?.AddExperience(10);
                 Log("装備武器に経験値 +10");
-                DropWeapon(defeated.Position);
+                DropWeapon(defeated.Position, defeated.ActorName);
             }
 
             Map.RemoveDeadActors();
         }
 
-        private void DropWeapon(GridPosition position)
+        private void DropWeapon(GridPosition position, string defeatedEnemyName)
         {
             if (position == StairsPosition)
             {
@@ -277,24 +355,92 @@ namespace WeaponMazeAlchemy.Prototype
             }
 
             WeaponInstance weapon = weaponGenerator.GenerateForDungeon(DungeonDifficulty, CurrentFloor);
+            int baseRank = WeaponRankCalculator.GetBaseRank(DungeonDifficulty, CurrentFloor);
             WeaponDrop drop = new WeaponDrop(position, weapon);
             weaponDrops.Add(drop);
-            Log($"武器がドロップした: ランク {weapon.Rank}, Lv {weapon.Level}, 攻撃力 {weapon.CurrentStats.Attack}, 固有 {weapon.UniqueAbility.DisplayName}");
+            Log($"{defeatedEnemyName}が武器をドロップした(Floor {CurrentFloor}基準 / 基準ランク {baseRank}): {FormatWeaponSummary(weapon)}");
         }
 
-        public bool TryEquipPendingWeapon()
+        public bool TryAddPendingWeaponToInventory()
         {
             if (pendingWeaponDrop == null)
             {
                 return false;
             }
 
-            Player.Equip(pendingWeaponDrop.Weapon);
+            if (inventory.IsFull)
+            {
+                Log($"バッグがいっぱい: {inventory.Count}/{inventory.MaxWeaponCount}");
+                return true;
+            }
+
+            WeaponInstance weapon = pendingWeaponDrop.Weapon;
+            if (!inventory.TryAdd(weapon))
+            {
+                Log("バッグに武器を入れられなかった");
+                return true;
+            }
+
             weaponDrops.Remove(pendingWeaponDrop);
             pendingWeaponDrop = null;
+            SyncPlayerEquipmentWithInventory();
 
-            WeaponInstance weapon = Player.EquippedWeapon;
-            Log($"武器を拾って装備した: ランク {weapon.Rank}, Lv {weapon.Level}, 攻撃力 {weapon.CurrentStats.Attack}, 固有 {weapon.UniqueAbility.DisplayName}");
+            Log($"武器をバッグに入れた [{inventory.Count}/{inventory.MaxWeaponCount}]: {FormatWeaponSummary(weapon)}");
+            return true;
+        }
+
+        public bool TrySwapPendingWeaponWithInventory(int inventoryIndex)
+        {
+            if (pendingWeaponDrop == null)
+            {
+                return false;
+            }
+
+            if (!inventory.TryGetWeapon(inventoryIndex, out WeaponInstance bagWeapon))
+            {
+                Log($"バッグ[{inventoryIndex + 1}]には交換できる武器がない");
+                return true;
+            }
+
+            WeaponDrop oldDrop = pendingWeaponDrop;
+            WeaponInstance droppedWeapon = oldDrop.Weapon;
+            if (!inventory.TryReplaceWeapon(inventoryIndex, droppedWeapon, out WeaponInstance replacedWeapon))
+            {
+                Log($"バッグ[{inventoryIndex + 1}]と交換できなかった");
+                return true;
+            }
+
+            weaponDrops.Remove(oldDrop);
+            WeaponDrop returnedDrop = new WeaponDrop(oldDrop.Position, replacedWeapon);
+            weaponDrops.Add(returnedDrop);
+            pendingWeaponDrop = null;
+            SyncPlayerEquipmentWithInventory();
+
+            Log($"落ちている武器をバッグ[{inventoryIndex + 1}]の武器と交換した");
+            Log($"バッグに入った: {FormatWeaponSummary(droppedWeapon)}");
+            Log($"床に置いた: {FormatWeaponSummary(bagWeapon)}");
+            return true;
+        }
+
+        public bool TryEquipInventoryWeapon(int inventoryIndex)
+        {
+            if (!turnManager.IsPlayerTurn || IsBattleOver || IsWeaponChoiceActive)
+            {
+                return false;
+            }
+
+            if (!inventory.TryGetWeapon(inventoryIndex, out WeaponInstance bagWeapon))
+            {
+                return false;
+            }
+
+            if (!inventory.TryEquip(inventoryIndex))
+            {
+                return false;
+            }
+
+            SyncPlayerEquipmentWithInventory();
+            Log($"バッグの武器[{inventoryIndex + 1}]を装備した: {FormatWeaponSummary(bagWeapon)}");
             return true;
         }
 
@@ -319,7 +465,7 @@ namespace WeaponMazeAlchemy.Prototype
             }
 
             pendingWeaponDrop = drop;
-            Log("落ちている武器を発見！ Eで装備 / Qで拾わない");
+            Log("落ちている武器を発見！ Bでバッグ / 1-3でバッグ枠と交換 / Qで拾わない");
         }
 
         private void FaceTarget(Actor actor, GridPosition targetPosition)
@@ -376,7 +522,9 @@ namespace WeaponMazeAlchemy.Prototype
                 }
             }
 
-            Log($"階段を降りて Floor {CurrentFloor} へ進んだ");
+            Log($"Floor {CurrentFloor} に進んだ");
+            Log($"敵が少し強くなった: HP +{GetEnemyHpFloorBonus(CurrentFloor)}, 攻撃力 +{GetEnemyAttackFloorBonus(CurrentFloor)}, 防御力 +{GetEnemyDefenseFloorBonus(CurrentFloor)}");
+            Log($"武器ドロップ基準ランク: {WeaponRankCalculator.GetBaseRank(DungeonDifficulty, CurrentFloor)}");
             Log($"フロアテンプレート「{currentTemplateName}」を生成した。S は階段");
             FloorChanged?.Invoke();
         }
@@ -409,9 +557,9 @@ namespace WeaponMazeAlchemy.Prototype
                         playerPosition = position;
                         foundPlayer = true;
                     }
-                    else if (tile == 'E')
+                    else if (EnemyDefinition.IsEnemyTile(tile))
                     {
-                        enemies.Add(CreateEnemy(enemyIndex, position, currentFloor));
+                        enemies.Add(CreateEnemy(enemyIndex, position, currentFloor, EnemyDefinition.FromTemplateTile(tile)));
                         enemyIndex++;
                     }
                     else if (tile == 'S')
@@ -435,20 +583,67 @@ namespace WeaponMazeAlchemy.Prototype
             return new FloorBuildResult(template, map, playerPosition, stairsPosition, enemies);
         }
 
-        private static EnemyActor CreateEnemy(int enemyIndex, GridPosition position, int currentFloor)
+        private static EnemyActor CreateEnemy(int enemyIndex, GridPosition position, int currentFloor, EnemyDefinition definition)
         {
-            int floorBonus = Mathf.Max(0, currentFloor - 1);
             StatBlock stats = new StatBlock(
-                50 + enemyIndex * 5 + floorBonus * 5,
+                definition.BaseHp + GetEnemyHpFloorBonus(currentFloor),
                 0,
-                9 + enemyIndex + floorBonus * 2,
-                2 + enemyIndex + floorBonus,
+                definition.BaseAttack + GetEnemyAttackFloorBonus(currentFloor),
+                definition.BaseDefense + GetEnemyDefenseFloorBonus(currentFloor),
                 0,
                 100,
                 0,
                 0);
 
-            return new EnemyActor($"スライム{enemyIndex}", position, stats);
+            return new EnemyActor($"{definition.DisplayName}{enemyIndex}", position, stats, definition);
+        }
+
+        private static int GetEnemyHpFloorBonus(int currentFloor)
+        {
+            return GetFloorBonus(currentFloor) * EnemyHpFloorGrowth;
+        }
+
+        private static int GetEnemyAttackFloorBonus(int currentFloor)
+        {
+            return GetFloorBonus(currentFloor) * EnemyAttackFloorGrowth;
+        }
+
+        private static int GetEnemyDefenseFloorBonus(int currentFloor)
+        {
+            return GetFloorBonus(currentFloor) * EnemyDefenseFloorGrowth;
+        }
+
+        private static int GetFloorBonus(int currentFloor)
+        {
+            return Mathf.Max(0, currentFloor - 1);
+        }
+
+        private static string FormatWeaponSummary(WeaponInstance weapon)
+        {
+            if (weapon == null)
+            {
+                return "なし";
+            }
+
+            string abilityName = weapon.UniqueAbility != null ? weapon.UniqueAbility.DisplayName : "なし";
+            return $"ランク {weapon.Rank}, Lv {weapon.Level}, 攻撃力 {weapon.CurrentStats.Attack}, 固有 {abilityName}";
+        }
+
+        private void InitializeInventoryFromEquippedWeapon()
+        {
+            if (Player.EquippedWeapon == null)
+            {
+                return;
+            }
+
+            inventory.TryAdd(Player.EquippedWeapon);
+            inventory.TryEquip(0);
+            SyncPlayerEquipmentWithInventory();
+        }
+
+        private void SyncPlayerEquipmentWithInventory()
+        {
+            Player.Equip(inventory.EquippedWeapon);
         }
 
         private void Log(string message)
