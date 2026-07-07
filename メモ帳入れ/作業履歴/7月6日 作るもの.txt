@@ -414,3 +414,110 @@ Playモードで以下を確認できる状態にしてください。
   * Golemの2ターンに1回行動を追加
 * `Assets/Scripts/Prototype/Runtime/PrototypeBattleBootstrap.cs`
   * 敵ステータス表示にAI傾向を追加
+
+
+
+## 2026-07-07 正式実装用コードの最小土台追加
+
+今回できたこと:
+
+* Prototype側は `Assets/Scripts/Prototype` に残したまま、新しく正式実装用コードを `Assets/Scripts/Game` 以下に作成した
+* 正式実装用のフォルダを作成した
+  * `Core`
+  * `Grid`
+  * `Turn`
+  * `Actors`
+  * `Battle`
+  * `Weapons`
+  * `Abilities`
+  * `Dungeon`
+  * `Inventory`
+  * `UI`
+  * `Data`
+* 正式実装側の最小コア型を作成した
+  * `GridPosition`
+  * `Direction`
+  * `Faction`
+* 正式実装側の `GridMap` を作成した
+  * 幅、高さ
+  * 壁マス管理
+  * 盤面外判定
+  * 通行可能判定
+* 正式実装側のActorを作成した
+  * `Actor`
+  * `PlayerActor`
+  * `EnemyActor`
+* 敵種類ごとの設定を持つ `EnemyActorDefinition : ScriptableObject` を作成した
+  * 敵名
+  * 移動タイプ
+  * 最大HP
+  * 攻撃力
+  * 防御力
+  * 使用技リスト
+* 仮の `AbilityDefinition : ScriptableObject` を作成した
+  * 今回は敵定義から参照できる枠だけ
+* 正式実装側の `TurnManager` を作成した
+  * プレイヤーがターン消費行動をすると敵ターンが進む
+  * その場回転はターンを消費しない
+  * 壁にぶつかった移動はターンを消費しない
+  * 通常攻撃は空振りでもターンを消費する
+* 正式実装側の `DamageCalculator` を作成した
+  * `damage = Mathf.Max(1, attackerAttack - defenderDefense)` の最小計算
+* 正式実装側の `BattleController` を作成した
+  * プレイヤー移動
+  * その場回転
+  * 通常攻撃
+  * 敵の接近
+  * 敵の隣接攻撃
+* 正式実装側の `GameBattleBootstrap` を作成した
+  * 固定マップ生成
+  * プレイヤー生成
+  * 敵1体生成
+  * テスト用敵定義をランタイム生成
+  * Play時に正式実装の最小戦闘を開始
+* 正式実装側の `GameBattleView` を作成した
+  * 仮の四角形グリッド表示
+  * 壁、プレイヤー、敵、向き表示
+* `SampleScene` と `TestScene` の役割を分けた
+  * `SampleScene` はPrototypeテスト用
+  * `TestScene` は正式実装テスト用
+* `PrototypeBattleBootstrap` は `SampleScene` 以外では起動しないようにした
+* `GameBattleBootstrap` は `TestScene` 以外では起動しないようにした
+* Prototype版とGame版が同じシーンで同時に出ないようにした
+* `Assets/Scripts` 全体のC#コンパイル確認済み
+* Unityエディタ上のPlay確認でも動作確認済み
+
+作成・変更した主なファイル:
+
+* `Assets/Scripts/Game/Core/GridPosition.cs`
+  * 正式実装用のグリッド座標
+* `Assets/Scripts/Game/Core/Direction.cs`
+  * 正式実装用の向きと入力補助
+* `Assets/Scripts/Game/Core/Faction.cs`
+  * プレイヤー/敵の所属
+* `Assets/Scripts/Game/Grid/GridMap.cs`
+  * 正式実装用のグリッドと壁管理
+* `Assets/Scripts/Game/Actors/Actor.cs`
+  * プレイヤー/敵の共通基底
+* `Assets/Scripts/Game/Actors/PlayerActor.cs`
+  * 正式実装用プレイヤー
+* `Assets/Scripts/Game/Actors/EnemyActor.cs`
+  * 敵定義ScriptableObjectから初期化される敵
+* `Assets/Scripts/Game/Data/EnemyActorDefinition.cs`
+  * 敵種類ごとのScriptableObject定義
+* `Assets/Scripts/Game/Data/EnemyMoveType.cs`
+  * 敵移動タイプ
+* `Assets/Scripts/Game/Abilities/AbilityDefinition.cs`
+  * 仮のアビリティScriptableObject
+* `Assets/Scripts/Game/Turn/TurnManager.cs`
+  * 正式実装用ターン管理
+* `Assets/Scripts/Game/Battle/BattleController.cs`
+  * 正式実装用の最小戦闘制御
+* `Assets/Scripts/Game/Battle/DamageCalculator.cs`
+  * 正式実装用の最小ダメージ計算
+* `Assets/Scripts/Game/Battle/GameBattleBootstrap.cs`
+  * TestScene用の正式実装テスト起動
+* `Assets/Scripts/Game/UI/GameBattleView.cs`
+  * 正式実装用の仮盤面表示
+* `Assets/Scripts/Prototype/Runtime/PrototypeBattleBootstrap.cs`
+  * SampleScene専用で起動するように変更

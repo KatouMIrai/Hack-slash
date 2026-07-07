@@ -2,11 +2,13 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.Controls;
+using UnityEngine.SceneManagement;
 
 namespace WeaponMazeAlchemy.Prototype
 {
     public class PrototypeBattleBootstrap : MonoBehaviour
     {
+        private const string TargetSceneName = "SampleScene";
         private const int MaxLogLines = 24;
         private const int VisibleLogLines = 10;
         private const float LogLineHeight = 20f;
@@ -30,6 +32,11 @@ namespace WeaponMazeAlchemy.Prototype
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void AutoCreate()
         {
+            if (!IsTargetScene())
+            {
+                return;
+            }
+
             if (FindFirstObjectByType<PrototypeBattleBootstrap>() != null)
             {
                 return;
@@ -41,8 +48,19 @@ namespace WeaponMazeAlchemy.Prototype
 
         private void Start()
         {
+            if (!IsTargetScene())
+            {
+                Destroy(gameObject);
+                return;
+            }
+
             view = gameObject.AddComponent<PrototypeBattleView>();
             SetupBattle();
+        }
+
+        private static bool IsTargetScene()
+        {
+            return SceneManager.GetActiveScene().name == TargetSceneName;
         }
 
         private void Update()
